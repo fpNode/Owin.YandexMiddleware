@@ -187,7 +187,8 @@ namespace fpNode.Owin.YandexMiddleware
                     new KeyValuePair<string, string>("code", code)
                 });
 
-                _httpClient.BaseAddress = new Uri(TokenEndpoint);
+                if (_httpClient.BaseAddress == null)
+                    _httpClient.BaseAddress = new Uri(TokenEndpoint);
                 HttpResponseMessage tokenResponse = await _httpClient.PostAsync("/token", content, Request.CallCancelled);
                 tokenResponse.EnsureSuccessStatusCode();
                 string text = await tokenResponse.Content.ReadAsStringAsync();
