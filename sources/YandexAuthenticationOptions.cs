@@ -99,11 +99,6 @@ namespace fpNode.Owin.YandexMiddleware
         public ISecureDataFormat<AuthenticationProperties> StateDataFormat { get; set; }
 
         /// <summary>
-        /// Gets or sets the site redirect url after login 
-        /// </summary>
-        public string StoreState { get; set; }
-
-        /// <summary>
         /// A list of permissions to request.
         /// Can be something like that "audio,video,pages" and etc.
         /// </summary>
