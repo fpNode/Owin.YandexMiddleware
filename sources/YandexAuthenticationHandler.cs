@@ -26,7 +26,7 @@ namespace fpNode.Owin.YandexMiddleware
         private const string GraphApiEndpoint = "https://login.yandex.ru/info";
 
         private readonly ILogger _logger;
-        private readonly HttpClient _httpClient;        
+        private readonly HttpClient _httpClient;
 
         public YandexAuthenticationHandler(HttpClient httpClient, ILogger logger)
         {
@@ -82,12 +82,12 @@ namespace fpNode.Owin.YandexMiddleware
 
                 string state = Options.StateDataFormat.Protect(properties);
 
-                Options.StoreState = state;
-
                 string authorizationEndpoint =
                     "https://oauth.yandex.ru/authorize" +
                         "?client_id=" + Uri.EscapeDataString(Options.AppId) +
-                        "&response_type=code";
+                        "&response_type=code" +
+                        "&state=" + Uri.EscapeDataString(state);
+
                 Response.Redirect(authorizationEndpoint);
             }
 
@@ -184,6 +184,7 @@ namespace fpNode.Owin.YandexMiddleware
                 _logger.WriteVerbose("AuthenticateCoreAsync");
 
                 string code = "";
+                string state = null;
 
                 IReadableStringCollection query = Request.Query;
                 IList<string> values = query.GetValues("code");
@@ -195,7 +196,14 @@ namespace fpNode.Owin.YandexMiddleware
 
                 _logger.WriteVerbose("return code is: " + code);
 
-                properties = Options.StateDataFormat.Unprotect(Options.StoreState);
+                
+                values = query.GetValues("state");
+                if (values != null && values.Count == 1)
+                {
+                    state = values[0];
+                }
+
+                properties = Options.StateDataFormat.Unprotect(state);
                 if (properties == null)
                 {
                     _logger.WriteVerbose("properties == null");
