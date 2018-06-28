@@ -34,6 +34,7 @@ namespace fpNode.Owin.YandexMiddleware
 
             _logger = app.CreateLogger<YandexAuthenticationMiddleware>();
 
+            _logger.WriteVerbose("App is starting up");
 
             if (Options.Provider == null)
             {

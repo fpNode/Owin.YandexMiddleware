@@ -46,12 +46,14 @@ namespace fpNode.Owin.YandexMiddleware
             {
                 return Task.FromResult<object>(null);
             }
-
+            
             //Helper checking if that module called for login
             AuthenticationResponseChallenge challenge = Helper.LookupChallenge(Options.AuthenticationType, Options.AuthenticationMode);
 
             if (challenge != null)
             {
+                _logger.WriteVerbose("start autorize");
+
                 string baseUri =
                     Request.Scheme +
                     Uri.SchemeDelimiter +
@@ -72,6 +74,8 @@ namespace fpNode.Owin.YandexMiddleware
                 {
                     properties.RedirectUri = currentUri;
                 }
+
+                _logger.WriteVerbose("RedirectUri: " + properties.RedirectUri);
 
                 // OAuth2 10.12 CSRF
                 GenerateCorrelationId(properties);
@@ -105,44 +109,64 @@ namespace fpNode.Owin.YandexMiddleware
         {
             if (Options.CallbackPath.HasValue && Options.CallbackPath == Request.Path)
             {
-                AuthenticationTicket ticket = await AuthenticateAsync(); //call Task<AuthenticationTicket> AuthenticateCoreAsync() step 2.3
-                if (ticket == null)
+                _logger.WriteVerbose("Request match with {host}/signin-yandex url");
+
+                try
                 {
-                    _logger.WriteWarning("Invalid return state, unable to redirect.");
-                    Response.StatusCode = 500;
-                    return true;
-                }
-
-                var context = new YandexReturnEndpointContext(Context, ticket);
-                context.SignInAsAuthenticationType = Options.SignInAsAuthenticationType;
-                context.RedirectUri = ticket.Properties.RedirectUri;
-
-                await Options.Provider.ReturnEndpoint(context);
-
-                if (context.SignInAsAuthenticationType != null &&
-                    context.Identity != null)
-                {
-                    ClaimsIdentity grantIdentity = context.Identity;
-                    if (!string.Equals(grantIdentity.AuthenticationType, context.SignInAsAuthenticationType, StringComparison.Ordinal))
+                    AuthenticationTicket ticket = await AuthenticateAsync(); //call Task<AuthenticationTicket> AuthenticateCoreAsync() step 2.3
+                    if (ticket == null)
                     {
-                        grantIdentity = new ClaimsIdentity(grantIdentity.Claims, context.SignInAsAuthenticationType, grantIdentity.NameClaimType, grantIdentity.RoleClaimType);
+                        _logger.WriteWarning("Invalid return state, unable to redirect.");
+                        Response.StatusCode = 500;
+                        return true;
                     }
-                    Context.Authentication.SignIn(context.Properties, grantIdentity);
-                }
 
-                if (!context.IsRequestCompleted && context.RedirectUri != null)
-                {
-                    string redirectUri = context.RedirectUri;
-                    if (context.Identity == null)
+                    var context = new YandexReturnEndpointContext(Context, ticket);
+                    context.SignInAsAuthenticationType = Options.SignInAsAuthenticationType;
+                    context.RedirectUri = ticket.Properties.RedirectUri;
+
+                    await Options.Provider.ReturnEndpoint(context);
+
+                    if (context.SignInAsAuthenticationType != null &&
+                        context.Identity != null)
                     {
-                        // add a redirect hint that sign-in failed in some way
-                        redirectUri = WebUtilities.AddQueryString(redirectUri, "error", "access_denied");
-                    }
-                    Response.Redirect(redirectUri);
-                    context.RequestCompleted();
-                }
+                        _logger.WriteVerbose("SignInAsAuthenticationType: " + context.SignInAsAuthenticationType);
 
-                return context.IsRequestCompleted;
+                        ClaimsIdentity grantIdentity = context.Identity;
+                        if (!string.Equals(grantIdentity.AuthenticationType, context.SignInAsAuthenticationType, StringComparison.Ordinal))
+                        {
+                            _logger.WriteVerbose("AuthenticationType: " + grantIdentity.AuthenticationType);
+
+                            grantIdentity = new ClaimsIdentity(grantIdentity.Claims, context.SignInAsAuthenticationType, grantIdentity.NameClaimType, grantIdentity.RoleClaimType);
+                        }
+                        Context.Authentication.SignIn(context.Properties, grantIdentity);
+
+                        _logger.WriteVerbose("Name: " + grantIdentity.Name);
+                    }
+
+                    if (!context.IsRequestCompleted && context.RedirectUri != null)
+                    {
+                        _logger.WriteVerbose("RedirectUri: " + context.RedirectUri);
+
+                        string redirectUri = context.RedirectUri;
+                        if (context.Identity == null)
+                        {
+                            _logger.WriteVerbose("access_denied");
+                            // add a redirect hint that sign-in failed in some way
+                            redirectUri = WebUtilities.AddQueryString(redirectUri, "error", "access_denied");
+                        }
+                        Response.Redirect(redirectUri);
+                        context.RequestCompleted();
+                    }
+
+                    _logger.WriteVerbose("IsRequestCompleted: " + context.IsRequestCompleted);
+
+                    return context.IsRequestCompleted;
+                }
+                catch (Exception ex)
+                {
+                    _logger.WriteError(ex.Message);
+                }
             }
 
             return false;
@@ -157,6 +181,8 @@ namespace fpNode.Owin.YandexMiddleware
 
             try
             {
+                _logger.WriteVerbose("AuthenticateCoreAsync");
+
                 string code = "";
 
                 IReadableStringCollection query = Request.Query;
@@ -167,15 +193,19 @@ namespace fpNode.Owin.YandexMiddleware
                     code = values[0];
                 }
 
+                _logger.WriteVerbose("return code is: " + code);
+
                 properties = Options.StateDataFormat.Unprotect(Options.StoreState);
                 if (properties == null)
                 {
+                    _logger.WriteVerbose("properties == null");
                     return null;
                 }
 
                 // OAuth2 10.12 CSRF
                 if (!ValidateCorrelationId(properties, _logger))
                 {
+                    _logger.WriteVerbose("ValidateCorrelationId false");
                     return new AuthenticationTicket(null, properties);
                 }
 
@@ -191,6 +221,9 @@ namespace fpNode.Owin.YandexMiddleware
                     _httpClient.BaseAddress = new Uri(TokenEndpoint);
                 HttpResponseMessage tokenResponse = await _httpClient.PostAsync("/token", content, Request.CallCancelled);
                 tokenResponse.EnsureSuccessStatusCode();
+
+                _logger.WriteVerbose("get token");
+
                 string text = await tokenResponse.Content.ReadAsStringAsync();
                 var JsonResponse = JsonConvert.DeserializeObject<dynamic>(text);
 
@@ -198,13 +231,18 @@ namespace fpNode.Owin.YandexMiddleware
                 string expires = JsonResponse["expires_in"];
                 //string userid = JsonResponse["x_mailru_vid"];
 
+                _logger.WriteVerbose("accessToken: " + accessToken);
+
                 var request = new HttpRequestMessage(HttpMethod.Get, GraphApiEndpoint);
                 request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
                 HttpResponseMessage graphResponse = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, Request.CallCancelled);
-
                 graphResponse.EnsureSuccessStatusCode();
+                
                 text = await graphResponse.Content.ReadAsStringAsync();
+
+                _logger.WriteVerbose("user info: " + text);
+
                 var UserInfoResponseJson = JObject.Parse(text);
 
                 var context = new YandexAuthenticatedContext(Context, UserInfoResponseJson, accessToken, expires);
@@ -233,12 +271,22 @@ namespace fpNode.Owin.YandexMiddleware
 
                 await Options.Provider.Authenticated(context);
 
+                _logger.WriteVerbose("user is Authenticated");
+
                 return new AuthenticationTicket(context.Identity, context.Properties);
 
             }
             catch (Exception ex)
             {
+                _logger.WriteError("---");
                 _logger.WriteError(ex.Message);
+                var e = ex.InnerException;
+                while(e != null)
+                {
+                    _logger.WriteError(e.Message);
+                    e = e.InnerException;
+                }
+                _logger.WriteError("---");
             }
             return new AuthenticationTicket(null, properties);
         }
